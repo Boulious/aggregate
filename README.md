@@ -28,7 +28,7 @@ aws ecr create-repository --repository-name generator --image-scanning-configura
 aws ecr create-repository --repository-name aggregator --image-scanning-configuration scanOnPush=true --region {REGION}
 ```
 
-Authorize locak Docker to your AWS ECR, to be able to push images. 
+Authorize local Docker to your AWS ECR, to be able to push images. 
 ```bash
 aws ecr get-login-password                                                      
 docker login -u AWS -p {KEY} https://{ACCOUNT_ID}.dkr.ecr.{REGION}.amazonaws.com/
@@ -44,7 +44,7 @@ docker push {ACCOUNT_ID}.dkr.ecr.{REGION}.amazonaws.com/aggregator:latest
 ```
 ## Running
 
-Use published images to run in AWS Batch or any other environmet for containers.
+Use published images to run in AWS Batch or any other environment for containers.
  
 ## License
 [MIT](https://github.com/emilia-smolko/aggregate/blob/main/LICENSE)
