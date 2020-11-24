@@ -1,0 +1,373 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "AWS CloudFormation Template Base VPC, Subnet, SecurityGroup, Endpoints.",
+    "Resources": {
+        "VPC": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "EnableDnsHostnames" : true,
+                "EnableDnsSupport" : true,
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "MyBatchVPC"
+                    }
+                ]
+            }
+        },
+        "RouteTable": {
+            "Type": "AWS::EC2::RouteTable",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "MyBatchRT"
+                    }
+                ]
+            }
+        },
+        "SecurityGroup": {
+            "Type": "AWS::EC2::SecurityGroup",
+            "Properties": {
+                "GroupName" : "MyBatchSecurityGroup",
+                "GroupDescription": "EC2 Security Group for instances launched in the VPC by Batch",
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "MyBatchSecurityGroup"
+                    }
+                ]
+            }
+        },
+        "InboundRule": {
+            "Type": "AWS::EC2::SecurityGroupIngress",
+            "Properties":{
+               "IpProtocol": "tcp",
+               "FromPort": 0,
+               "ToPort": 65535,
+               "SourceSecurityGroupId": {
+                 "Fn::GetAtt": [
+                   "SecurityGroup",
+                   "GroupId"
+                  ]
+               },
+               "GroupId": {
+                  "Fn::GetAtt": [
+                    "SecurityGroup",
+                    "GroupId"
+                  ]
+               }
+            }
+         },
+        "Subnet": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/24",
+                "AvailabilityZone": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            {
+                                "Ref": "AWS::Region"
+                            },
+                            "a"
+                        ]
+                    ]
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "MapPublicIpOnLaunch": "False",
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "MyBatchSubnet"
+                    }
+                ]
+            }
+        },
+        "SubnetRouteTableAssociation": {
+            "Type": "AWS::EC2::SubnetRouteTableAssociation",
+            "Properties": {
+                "RouteTableId": {
+                    "Ref": "RouteTable"
+                },
+                "SubnetId": {
+                    "Ref": "Subnet"
+                }
+            }
+        },
+        "ECRG": {
+            "Type": "AWS::ECR::Repository",
+            "Properties": {
+                "ImageScanningConfiguration": {
+                    "scanOnPush": "true"
+                },
+                "RepositoryName": "generator"
+            }
+        },
+        "ECRA": {
+            "Type": "AWS::ECR::Repository",
+            "Properties": {
+                "ImageScanningConfiguration": {
+                    "scanOnPush": "true"
+                },
+                "RepositoryName": "aggregator"
+            }
+        },
+        "S3Endpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": "*",
+                            "Action": [
+                                "*"
+                            ],
+                            "Resource": [
+                                "*"
+                            ]
+                        }
+                    ]
+                },
+                "RouteTableIds": [
+                    {
+                        "Ref": "RouteTable"
+                    }
+                ],
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.s3"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "ECRAPIEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "PrivateDnsEnabled" : true,
+                "SubnetIds": [
+                    {
+                        "Ref": "Subnet"
+                    }
+                ],
+                "SecurityGroupIds":[{
+                    "Ref": "SecurityGroup"
+                }],
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.ecr.api"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "ECRDKREndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "PrivateDnsEnabled" : true,
+                "SubnetIds": [
+                    {
+                        "Ref": "Subnet"
+                    }
+                ],
+                "SecurityGroupIds":[{
+                    "Ref": "SecurityGroup"
+                }],
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.ecr.dkr"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "LogsEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "PrivateDnsEnabled" : true,
+                "SubnetIds": [
+                    {
+                        "Ref": "Subnet"
+                    }
+                ],
+                "SecurityGroupIds":[{
+                    "Ref": "SecurityGroup"
+                }],
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.logs"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "ECSTelemetryEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "PrivateDnsEnabled" : true,
+                "SubnetIds": [
+                    {
+                        "Ref": "Subnet"
+                    }
+                ],
+                "SecurityGroupIds":[{
+                    "Ref": "SecurityGroup"
+                }],
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.ecs-telemetry"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "ECSAgentEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "PrivateDnsEnabled" : true,
+                "SubnetIds": [
+                    {
+                        "Ref": "Subnet"
+                    }
+                ],
+                "SecurityGroupIds":[{
+                    "Ref": "SecurityGroup"
+                }],
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.ecs-agent"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "ECSEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "PrivateDnsEnabled" : true,
+                "SubnetIds": [
+                    {
+                        "Ref": "Subnet"
+                    }
+                ],
+                "SecurityGroupIds":[{
+                    "Ref": "SecurityGroup"
+                }],
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.ecs"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "GlueEndpoint": {
+            "Type": "AWS::EC2::VPCEndpoint",
+            "Properties": {
+                "PrivateDnsEnabled" : true,
+                "SubnetIds": [
+                    {
+                        "Ref": "Subnet"
+                    }
+                ],
+                "SecurityGroupIds":[{
+                    "Ref": "SecurityGroup"
+                }],
+                "VpcEndpointType": "Interface",
+                "ServiceName": {
+                    "Fn::Sub": "com.amazonaws.${AWS::Region}.glue"
+                },
+                "VpcId": {
+                    "Ref": "VPC"
+                }
+            }
+        },
+        "ComputeEnvironment": {
+            "Type": "AWS::Batch::ComputeEnvironment",
+            "Properties": {
+                "ComputeEnvironmentName": "MyBatchEnv",
+                "Type": "UNMANAGED",
+                "ServiceRole": {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "arn:aws:iam::",
+                            {
+                                "Ref": "AWS::AccountId"
+                            },
+                            ":role/service-role/AWSBatchServiceRole"
+                        ]
+                    ]
+                }
+            }
+        },
+        "JobQueue": {
+            "Type": "AWS::Batch::JobQueue",
+            "Properties": {
+                "JobQueueName": "MyBatchJobQueue",
+                "Priority": 1,
+                "ComputeEnvironmentOrder": [
+                    {
+                        "Order": 1,
+                        "ComputeEnvironment": {
+                            "Ref": "ComputeEnvironment"
+                        }
+                    }
+                ]
+            }
+        }
+    },
+    "Outputs": {
+        "BatchVPC": {
+            "Description": "The VPC ID to use for batch",
+            "Value": {
+                "Ref": "VPC"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-VPCID"
+                }
+            }
+        },
+        "BatchSubnet": {
+            "Description": "The subnet ID to use for batch servers",
+            "Value": {
+                "Ref": "Subnet"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-SubnetID"
+                }
+            }
+        },
+        "BatchSecurityGroup": {
+            "Description": "The SecurityGroup ID to use for batch servers",
+            "Value": {
+                "Ref": "SecurityGroup"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-SecurityGroupID"
+                }
+            }
+        }
+    }
+}

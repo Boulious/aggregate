@@ -1,0 +1,420 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "AWS CloudFormation Template Unmanaged Batch Environment.",
+  "Parameters": {
+    "BucketName": {
+      "Default": "mybatch-workingdata",
+      "Description": "S3 Bucket name to be created (need to be unique).",
+      "Type": "String"
+    },
+    "NetworkStackNameParameter": {
+      "Default": "BatchNetwork",
+      "Description": "CloudFormation Stack Name with VPC, Subnet and SecurityGroup.",
+      "Type": "String"
+    },
+    "LatestAmiId": {
+      "Description": "Region specific image from the Parameter Store.",
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+      "Default": "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
+    },
+    "ECSClusterName": {
+      "Description": "Name of created cluster ECS for Batch Compute Environment ",
+      "Type": "String",
+      "Default": "myBatchEnv_Batch_"
+    }
+  },
+  "Resources": {
+    "S3Bucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "AccessControl": "Private",
+        "BucketName": {
+          "Fn::Sub": "${BucketName}"
+        }
+      }
+    },
+    "BatchAppPolicy": {
+      "Type": "AWS::IAM::ManagedPolicy",
+      "Properties": {
+        "ManagedPolicyName": "BatchPolicy",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:GetAccessPoint",
+                "s3:ListAccessPoints",
+                "glue:*"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject",
+                "s3:GetObject",
+                "s3:ListBucketMultipartUploads",
+                "s3:AbortMultipartUpload",
+                "s3:ListBucket",
+                "s3:ListMultipartUploadParts"
+              ],
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:aws:s3:::${BucketName}"
+                },
+                {
+                  "Fn::Sub": "arn:aws:s3:::${BucketName}/*"
+                }
+              ]
+            }
+          ]
+        },
+        "Roles": [
+          {
+            "Ref": "BatchAppRole"
+          }
+        ]
+      }
+    },
+    "BatchAppRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "myBatchAppRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs-tasks.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+        ]
+      }
+    },
+    "InstanceProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "InstanceProfileName" : "BatchInstanceProfile",
+        "Roles": [
+          {
+            "Ref": "EcsInstanceRole"
+          }
+        ]
+      }
+    },
+    "EcsInstanceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "BatchInstanceRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2008-10-17",
+          "Statement": [
+            {
+              "Sid": "",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+        ]
+      }
+    },
+    "LaunchTemplate": {
+      "Type": "AWS::EC2::LaunchTemplate",
+      "Properties": {
+        "LaunchTemplateName": {
+          "Fn::Sub": "${AWS::StackName}-LT"
+        },
+        "LaunchTemplateData": {
+          "ImageId": {
+            "Ref": "LatestAmiId"
+          },
+          "IamInstanceProfile": {
+            "Arn": {
+              "Fn::GetAtt": [
+                "InstanceProfile",
+                "Arn"
+              ]
+            }
+          },
+          "SecurityGroupIds": [
+            {
+              "Fn::ImportValue": {
+                "Fn::Sub": "${NetworkStackNameParameter}-SecurityGroupID"
+              }
+            }
+          ],
+          "UserData": {
+            "Fn::Base64": {
+              "Fn::Join": [
+                "",
+                [
+                  "MIME-Version: 1.0\n",
+                  "Content-Type: multipart/mixed; boundary=\"==MYBOUNDARY==\"\n",
+                  "\n",
+                  "--==MYBOUNDARY==","\nContent-Type: text/x-shellscript; charset=\"us-ascii\"\n",
+                  "#!/bin/bash\n",
+                  "echo ECS_CLUSTER=",
+                  {
+                    "Fn::Sub": "${ECSClusterName}"
+                  },
+                  " >> /etc/ecs/ecs.config\n",
+                  "\n",
+                  "--==MYBOUNDARY==\n"
+                ]
+              ]
+            }
+          }
+        }
+      }
+    },
+    "AutoScalingGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "AutoScalingGroupName": "MyBatchASG",
+        "MixedInstancesPolicy": {
+          "LaunchTemplate": {
+            "LaunchTemplateSpecification": {
+              "LaunchTemplateName": {
+                "Fn::Sub": "${AWS::StackName}-LT"
+              },
+              "Version": {
+                "Fn::GetAtt": [
+                  "LaunchTemplate",
+                  "LatestVersionNumber"
+                ]
+              }
+            },
+            "Overrides": [
+              {
+                "InstanceType": "t3.small"
+              },
+              {
+                "InstanceType": "t3a.medium"
+              },
+              {
+                "InstanceType": "t3.medium"
+              },
+              {
+                "InstanceType": "t3a.small"
+              },
+              {
+                "InstanceType": "c4.large"
+              },
+              {
+                "InstanceType": "c3.large"
+              }
+            ]
+          },
+          "InstancesDistribution": {
+            "OnDemandPercentageAboveBaseCapacity": 0,
+            "SpotAllocationStrategy": "lowest-price",
+            "SpotInstancePools": 2
+          }
+        },
+        "AvailabilityZones": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                {
+                  "Ref": "AWS::Region"
+                },
+                "a"
+              ]
+            ]
+          }
+        ],
+        "Cooldown": "300",
+        "DesiredCapacity": "1",
+        "HealthCheckGracePeriod": "300",
+        "HealthCheckType": "EC2",
+        "MaxSize": "2",
+        "MinSize": "0",
+        "VPCZoneIdentifier": [
+          {
+            "Fn::ImportValue": {
+              "Fn::Sub": "${NetworkStackNameParameter}-SubnetID"
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "MyBatchNode",
+            "PropagateAtLaunch": true
+          }
+        ],
+        "TerminationPolicies": [
+          "Default"
+        ]
+      }
+    },
+    "Generator": {
+      "Type": "AWS::Batch::JobDefinition",
+      "Properties": {
+        "JobDefinitionName": "Generator",
+        "Type": "container",
+        "ContainerProperties": {
+          "Image": {
+            "Fn::Join": [
+              "",
+              [
+                {
+                  "Ref": "AWS::AccountId"
+                },
+                ".dkr.ecr.",
+                {
+                  "Ref": "AWS::Region"
+                },
+                ".amazonaws.com/generator:latest"
+              ]
+            ]
+          },
+          "Vcpus": 1,
+          "Memory": 900,
+          "Command": [],
+          "ExecutionRoleArn": {
+            "Fn::GetAtt": [
+              "BatchAppRole",
+              "Arn"
+            ]
+          },
+          "JobRoleArn": {
+            "Fn::GetAtt": [
+              "BatchAppRole",
+              "Arn"
+            ]
+          },
+          "Environment": [
+            {
+              "Name": "REGION",
+              "Value": {
+                "Ref": "AWS::Region"
+              }
+            },
+            {
+              "Name": "MONTH",
+              "Value": "202009"
+            },
+            {
+              "Name": "BUCKET",
+              "Value": {
+                "Fn::Sub": "${BucketName}"
+              }
+            },
+            {
+              "Name": "MLNSx2",
+              "Value": "5"
+            }
+          ]
+        },
+        "RetryStrategy": {
+          "Attempts": 1
+        },
+        "Timeout": {
+          "AttemptDurationSeconds": 3000
+        }
+      }
+    },
+    "Aggregator": {
+      "Type": "AWS::Batch::JobDefinition",
+      "Properties": {
+        "JobDefinitionName": "Aggregator",
+        "Type": "container",
+        "ContainerProperties": {
+          "Image": {
+            "Fn::Join": [
+              "",
+              [
+                {
+                  "Ref": "AWS::AccountId"
+                },
+                ".dkr.ecr.",
+                {
+                  "Ref": "AWS::Region"
+                },
+                ".amazonaws.com/aggregator:latest"
+              ]
+            ]
+          },
+          "Vcpus": 1,
+          "Memory": 900,
+          "Command": [],
+          "ExecutionRoleArn": {
+            "Fn::GetAtt": [
+              "BatchAppRole",
+              "Arn"
+            ]
+          },
+          "JobRoleArn": {
+            "Fn::GetAtt": [
+              "BatchAppRole",
+              "Arn"
+            ]
+          },
+          "Environment": [
+            {
+              "Name": "REGION",
+              "Value": {
+                "Ref": "AWS::Region"
+              }
+            },
+            {
+              "Name": "MONTH",
+              "Value": "202009"
+            },
+            {
+              "Name": "BUCKET",
+              "Value": {
+                "Fn::Sub": "${BucketName}"
+              }
+            }
+          ]
+        },
+        "RetryStrategy": {
+          "Attempts": 1
+        },
+        "Timeout": {
+          "AttemptDurationSeconds": 3000
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "GneratorID": {
+      "Description": "The batch job with generator container.",
+      "Value": {
+        "Ref": "Generator"
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-GeneratorID"
+        }
+      }
+    },
+    "AggregatorID": {
+      "Description": "The batch job with aggregator container.",
+      "Value": {
+        "Ref": "Aggregator"
+      },
+      "Export": {
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-AggregatorID"
+        }
+      }
+    }
+  }
+}
